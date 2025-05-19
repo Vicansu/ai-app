@@ -1,3 +1,4 @@
+pip install --upgrade -r requirements.txt
 from flask import Flask, request, render_template_string
 from datetime import datetime, timedelta
 import matplotlib
