@@ -46,25 +46,25 @@ HTML_FORM = """
 <h1>📘 AI-Powered Study Planner</h1>
 
 <form method="POST">
-    <label>Subjects (comma-separated):</label>
+    <label>Subjects (comma-separated):    </label>
     <input type="text" name="subjects" required>
 
-    <label>Scores (comma-separated):</label>
+    <label>Scores (comma-separated):    </label>
     <input type="text" name="scores" required>
 
-    <label>Test Dates (YYYY-MM-DD, comma-separated , Within The Next Week.):</label>
+    <label>Test Dates (YYYY-MM-DD, comma-separated ,within the next):</label>
     <input type="text" name="dates" required>
 
-    <label>Total Study Hours Available:</label>
+    <label>Total Study Hours Available:    </label>
     <input type="number" step="0.1" name="total_hours" required>
 
     <label>Past Study Hours (comma-separated):</label>
     <input type="text" name="study_hours" required>
 
-    <label>Past Sleep Hours (comma-separated):</label>
+    <label>Past Sleep Hours (comma-separated):    </label>
     <input type="text" name="sleep_hours" required>
 
-    <label>Score Fluctuations (comma-separated):</label>
+    <label>Score Fluctuations (comma-separated):    </label>
     <input type="text" name="score_fluctuations" required>
 
     <input type="submit" value="Generate Study Plan">
