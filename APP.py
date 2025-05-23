@@ -46,26 +46,35 @@ HTML_FORM = """
 <h1>📘 AI-Powered Study Planner</h1>
 
 <form method="POST">
-    <label>Subjects (comma-separated):    </label>
+    <label>Subjects (comma-separated):</label>
     <input type="text" name="subjects" required>
 
-    <label>Scores (comma-separated):    </label>
+    <label>Scores (comma-separated):</label>
     <input type="text" name="scores" required>
 
-    <label>Test Dates (YYYY-MM-DD, comma-separated ,within the next):</label>
+    <label>Desired Scores (comma-separated):</label>
+    <input type="text" name="desired_scores" required>
+
+    <label>Test Dates (YYYY-MM-DD, comma-separated):</label>
     <input type="text" name="dates" required>
 
-    <label>Total Study Hours Available:    </label>
+    <label>Total Study Hours Available:</label>
     <input type="number" step="0.1" name="total_hours" required>
 
     <label>Past Study Hours (comma-separated):</label>
     <input type="text" name="study_hours" required>
 
-    <label>Past Sleep Hours (comma-separated):    </label>
+    <label>Past Sleep Hours (comma-separated):</label>
     <input type="text" name="sleep_hours" required>
 
-    <label>Score Fluctuations (comma-separated):    </label>
+    <label>Score Fluctuations (comma-separated):</label>
     <input type="text" name="score_fluctuations" required>
+
+    <label>Exercise Frequency (times/week):</label>
+    <input type="number" name="exercise_frequency" required>
+
+    <label>Diet Quality (1-10):</label>
+    <input type="number" name="diet_quality" required>
 
     <input type="submit" value="Generate Study Plan">
 </form>
@@ -107,12 +116,12 @@ HTML_FORM = """
 </html>
 """
 
-def create_study_schedule(subjects, scores, test_dates, total_hours):
+def create_study_schedule(subjects, scores, desired_scores, test_dates, total_hours):
     today = datetime.today()
     urgency = [(datetime.strptime(d, "%Y-%m-%d") - today).days for d in test_dates]
     urgency = [max(u, 1) for u in urgency]
-    importance = [100 - s for s in scores]
-    weights = [imp / urg for imp, urg in zip(importance, urgency)]
+    improvement_needed = [max(ds - s, 1) for s, ds in zip(scores, desired_scores)]
+    weights = [imp / urg for imp, urg in zip(improvement_needed, urgency)]
     total_weight = sum(weights)
     allocations = [(w / total_weight) * total_hours for w in weights]
     return {subj: round(hours) for subj, hours in zip(subjects, allocations)}, urgency
@@ -228,10 +237,18 @@ def generate_daily_schedule_chart(total_hours):
     plt.close()
     return chart_base64
 
-def detect_burnout(study_hours, sleep_hours):
+def detect_burnout(study_hours, sleep_hours, exercise_freq, diet_quality):
     avg_sleep = round(np.mean(sleep_hours), 2)
-    burnout = avg_sleep < 6  # Threshold increased to 6 hours
-    return ("Burnout Detected" if burnout else "No Burnout"), round(np.mean(study_hours), 2), avg_sleep
+    avg_study = round(np.mean(study_hours), 2)
+
+    burnout_risk = 1 if avg_sleep < 6 else 0
+    if exercise_freq >= 3:
+        burnout_risk -= 0.5
+    if diet_quality >= 7:
+        burnout_risk -= 0.5
+
+    status = "Burnout Detected" if burnout_risk > 0.5 else "No Burnout"
+    return status, avg_study, avg_sleep
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -239,15 +256,18 @@ def index():
     if request.method == "POST":
         subjects = [s.strip() for s in request.form["subjects"].split(",")]
         scores = list(map(int, request.form["scores"].split(",")))
+        desired_scores = list(map(int, request.form["desired_scores"].split(",")))
         test_dates = [s.strip() for s in request.form["dates"].split(",")]
         total_hours = float(request.form["total_hours"])
         study_hours = list(map(float, request.form["study_hours"].split(",")))
         sleep_hours = list(map(float, request.form["sleep_hours"].split(",")))
         score_fluctuations = list(map(float, request.form["score_fluctuations"].split(",")))
+        exercise_freq = int(request.form["exercise_frequency"])
+        diet_quality = int(request.form["diet_quality"])
 
-        schedule, urgencies = create_study_schedule(subjects, scores, test_dates, total_hours)
+        schedule, urgencies = create_study_schedule(subjects, scores, desired_scores, test_dates, total_hours)
         weekly_chart = generate_weekly_chart(schedule, subjects, test_dates)
-        burnout_status, avg_study, avg_sleep = detect_burnout(study_hours, sleep_hours)
+        burnout_status, avg_study, avg_sleep = detect_burnout(study_hours, sleep_hours, exercise_freq, diet_quality)
         daily_chart = generate_daily_schedule_chart(total_hours)
         schedule_str = "\n".join([f"{k}: {v} hrs" for k, v in schedule.items()])
 
