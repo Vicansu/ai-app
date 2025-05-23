@@ -35,6 +35,9 @@ HTML_FORM = """
         .schedule, .averages, .advice {
             background: #eef; padding: 10px; border-left: 5px solid #007BFF; margin-top: 15px;
         }
+        .recommendation {
+            background: #fffae6; padding: 10px; border-left: 5px solid #ffc107; margin-top: 15px;
+        }
         img { max-width: 100%; height: auto; border-radius: 8px; }
         .daily-schedule-container {
             background: #eef; padding: 10px; border-left: 5px solid #28a745; margin-top: 15px;
@@ -70,11 +73,11 @@ HTML_FORM = """
     <label>Score Fluctuations (comma-separated):</label>
     <input type="text" name="score_fluctuations" required>
 
-    <label>Exercise Frequency (times/week):</label>
-    <input type="number" name="exercise_frequency" required>
-
     <label>Diet Quality (1-10):</label>
-    <input type="number" name="diet_quality" required>
+    <input type="number" name="diet_quality" min="1" max="10" required>
+
+    <label>Exercise Frequency (1-10):</label>
+    <input type="number" name="exercise_frequency" min="1" max="10" required>
 
     <input type="submit" value="Generate Study Plan">
 </form>
@@ -109,6 +112,15 @@ HTML_FORM = """
         - Include relaxation techniques or physical activity daily.
     </div>
     {% endif %}
+
+    {% if result['recommendations'] %}
+    <h2>🍎 Health Recommendations</h2>
+    <div class="recommendation">
+        {% for rec in result['recommendations'] %}
+            <p>{{ rec }}</p>
+        {% endfor %}
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 
@@ -120,11 +132,11 @@ def create_study_schedule(subjects, scores, desired_scores, test_dates, total_ho
     today = datetime.today()
     urgency = [(datetime.strptime(d, "%Y-%m-%d") - today).days for d in test_dates]
     urgency = [max(u, 1) for u in urgency]
-    improvement_needed = [max(ds - s, 1) for s, ds in zip(scores, desired_scores)]
+    improvement_needed = [max(0, d - s) for s, d in zip(scores, desired_scores)]
     weights = [imp / urg for imp, urg in zip(improvement_needed, urgency)]
-    total_weight = sum(weights)
+    total_weight = sum(weights) if sum(weights) > 0 else 1
     allocations = [(w / total_weight) * total_hours for w in weights]
-    return {subj: round(hours) for subj, hours in zip(subjects, allocations)}, urgency
+    return {subj: round(hours) for subj, hours in zip(subjects, allocations)}
 
 def generate_weekly_chart(schedule, subjects, test_dates):
     today = datetime.today()
@@ -192,9 +204,6 @@ def generate_daily_schedule_chart(total_hours):
         else:
             break
 
-    if not schedule_data:
-        return None
-
     fig, ax = plt.subplots(figsize=(10, 6))
     y_ticks = []
     y_positions = []
@@ -237,18 +246,9 @@ def generate_daily_schedule_chart(total_hours):
     plt.close()
     return chart_base64
 
-def detect_burnout(study_hours, sleep_hours, exercise_freq, diet_quality):
+def detect_burnout(sleep_hours):
     avg_sleep = round(np.mean(sleep_hours), 2)
-    avg_study = round(np.mean(study_hours), 2)
-
-    burnout_risk = 1 if avg_sleep < 6 else 0
-    if exercise_freq >= 3:
-        burnout_risk -= 0.5
-    if diet_quality >= 7:
-        burnout_risk -= 0.5
-
-    status = "Burnout Detected" if burnout_risk > 0.5 else "No Burnout"
-    return status, avg_study, avg_sleep
+    return ("Burnout Detected" if avg_sleep < 6 else "No Burnout"), avg_sleep
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -262,14 +262,21 @@ def index():
         study_hours = list(map(float, request.form["study_hours"].split(",")))
         sleep_hours = list(map(float, request.form["sleep_hours"].split(",")))
         score_fluctuations = list(map(float, request.form["score_fluctuations"].split(",")))
-        exercise_freq = int(request.form["exercise_frequency"])
         diet_quality = int(request.form["diet_quality"])
+        exercise_frequency = int(request.form["exercise_frequency"])
 
-        schedule, urgencies = create_study_schedule(subjects, scores, desired_scores, test_dates, total_hours)
+        schedule = create_study_schedule(subjects, scores, desired_scores, test_dates, total_hours)
         weekly_chart = generate_weekly_chart(schedule, subjects, test_dates)
-        burnout_status, avg_study, avg_sleep = detect_burnout(study_hours, sleep_hours, exercise_freq, diet_quality)
+        burnout_status, avg_sleep = detect_burnout(sleep_hours)
+        avg_study = round(np.mean(study_hours), 2)
         daily_chart = generate_daily_schedule_chart(total_hours)
         schedule_str = "\n".join([f"{k}: {v} hrs" for k, v in schedule.items()])
+
+        recommendations = []
+        if diet_quality < 5:
+            recommendations.append("🍏 Consider improving your diet. A nutritious diet boosts brain function and helps sustain energy levels.")
+        if exercise_frequency < 5:
+            recommendations.append("🏃 Try increasing your physical activity. Even light exercise can improve mood and focus.")
 
         result = {
             "schedule": schedule_str,
@@ -277,11 +284,11 @@ def index():
             "daily_chart": daily_chart,
             "burnout": burnout_status,
             "avg_study": avg_study,
-            "avg_sleep": avg_sleep
+            "avg_sleep": avg_sleep,
+            "recommendations": recommendations
         }
 
     return render_template_string(HTML_FORM, result=result)
 
 if __name__ == "__main__":
     app.run(debug=True)
-
