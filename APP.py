@@ -7,6 +7,7 @@ import numpy as np
 import io
 import base64
 import math
+import random
 
 app = Flask(__name__)
 
@@ -16,32 +17,68 @@ HTML_FORM = """
 <head>
     <title>AI Study Planner</title>
     <style>
-        body { font-family: Arial; margin: 40px; background: #f4f4f4; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            margin: 40px;
+            background: #f9fafc;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            color: #0056b3;
+            margin-bottom: 30px;
+        }
         form, .result {
-            background: white; padding: 20px; border-radius: 10px;
-            max-width: 800px; margin-bottom: 30px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            max-width: 900px;
+            margin: auto;
+            margin-bottom: 40px;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+        }
+        label {
+            font-weight: bold;
+            margin-top: 10px;
+            display: block;
         }
         input, textarea {
-            width: 100%; padding: 10px; margin: 8px 0; box-sizing: border-box;
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            box-sizing: border-box;
         }
         input[type="submit"] {
-            background: #007BFF; color: white; border: none;
+            background: #007BFF;
+            color: white;
+            border: none;
+            font-size: 1em;
+            border-radius: 6px;
+            padding: 12px;
             cursor: pointer;
+            margin-top: 15px;
         }
-        input[type="submit"]:hover { background: #0056b3; }
-        h2 { color: #333; }
-        .note { font-size: 0.9em; color: #666; }
-        .schedule, .averages, .advice {
-            background: #eef; padding: 10px; border-left: 5px solid #007BFF; margin-top: 15px;
+        input[type="submit"]:hover {
+            background: #0056b3;
         }
-        .recommendation {
-            background: #fffae6; padding: 10px; border-left: 5px solid #ffc107; margin-top: 15px;
+        h2 {
+            margin-top: 30px;
+            color: #222;
         }
-        img { max-width: 100%; height: auto; border-radius: 8px; }
-        .daily-schedule-container {
-            background: #eef; padding: 10px; border-left: 5px solid #28a745; margin-top: 15px;
+        .section {
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
         }
+        .schedule { background: #eef7ff; border-left: 5px solid #007BFF; }
+        .averages { background: #f0f7f0; border-left: 5px solid #28a745; }
+        .advice { background: #fff4f4; border-left: 5px solid #dc3545; }
+        .recommendation { background: #fff8e6; border-left: 5px solid #ffc107; }
+        .chart-container { text-align: center; margin-top: 20px; }
+        img { max-width: 100%; height: auto; border-radius: 8px; margin-top: 10px; }
+        .highlight { font-weight: bold; color: #d63384; }
     </style>
 </head>
 <body>
@@ -84,38 +121,39 @@ HTML_FORM = """
 
 {% if result %}
 <div class="result">
-    <h2>📊 Weekly Subject Study Distribution (Until Test Dates)</h2>
-    <img src="data:image/png;base64,{{ result['weekly_chart'] }}" alt="Weekly Chart">
+    <h2>📊 Weekly Subject Study Distribution</h2>
+    <div class="chart-container">
+        <img src="data:image/png;base64,{{ result['weekly_chart'] }}" alt="Weekly Chart">
+    </div>
 
     <h2>📅 Allocated Total Study Hours</h2>
-    <div class="schedule">{{ result['schedule'] }}</div>
+    <div class="section schedule">{{ result['schedule'] }}</div>
 
     <h2>📈 Averages</h2>
-    <div class="averages">
-        Average Study Hours: {{ result['avg_study'] }} hrs/day<br>
-        Average Sleep Hours: {{ result['avg_sleep'] }} hrs/night
+    <div class="section averages">
+        Average Study Hours: <span class="highlight">{{ result['avg_study'] }}</span> hrs/day<br>
+        Average Sleep Hours: <span class="highlight">{{ result['avg_sleep'] }}</span> hrs/night
     </div>
 
     <h2>🕒 Daily Study Schedule</h2>
-    <div class="daily-schedule-container">
+    <div class="chart-container">
         <img src="data:image/png;base64,{{ result['daily_chart'] }}" alt="Daily Schedule">
     </div>
 
     <h2>⚠️ Burnout Detection</h2>
     <p><strong>Status:</strong> {{ result['burnout'] }}</p>
     {% if result['burnout'] == 'Burnout Detected' %}
-    <div class="advice">
+    <div class="section advice">
         💡 <strong>Advice:</strong><br>
-        - Try reducing your study hours per day.<br>
-        - Improve sleep duration (target 7–8 hours).<br>
-        - Maintain consistent revision to reduce score fluctuations.<br>
-        - Include relaxation techniques or physical activity daily.
+        {% for tip in result['burnout_tips'] %}
+            - {{ tip }}<br>
+        {% endfor %}
     </div>
     {% endif %}
 
     {% if result['recommendations'] %}
     <h2>🍎 Health Recommendations</h2>
-    <div class="recommendation">
+    <div class="section recommendation">
         {% for rec in result['recommendations'] %}
             <p>{{ rec }}</p>
         {% endfor %}
@@ -136,7 +174,7 @@ def create_study_schedule(subjects, scores, desired_scores, test_dates, total_ho
     weights = [imp / urg for imp, urg in zip(improvement_needed, urgency)]
     total_weight = sum(weights) if sum(weights) > 0 else 1
     allocations = [(w / total_weight) * total_hours for w in weights]
-    return {subj: round(hours) for subj, hours in zip(subjects, allocations)}
+    return {subj: round(hours, 1) for subj, hours in zip(subjects, allocations)}
 
 def generate_weekly_chart(schedule, subjects, test_dates):
     today = datetime.today()
@@ -150,16 +188,17 @@ def generate_weekly_chart(schedule, subjects, test_dates):
         max_weeks = max(max_weeks, weeks_until)
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    width = 0.1
+    width = 0.8 / len(subjects)
     x = np.arange(max_weeks)
+    colors = plt.cm.tab10(np.linspace(0, 1, len(subjects)))
 
     for i, (subj, weeks) in enumerate(zip(subjects, subject_weeks)):
         weekly_allocation = schedule[subj] / weeks
         bars = [weekly_allocation if w < weeks else 0 for w in range(max_weeks)]
-        ax.bar(x + i * width, bars, width=width, label=subj)
+        ax.bar(x + i * width, bars, width=width, label=subj, color=colors[i])
 
     ax.set_ylabel("Study Hours")
-    ax.set_title("Weekly Subject Study Allocation (Until Test Dates)")
+    ax.set_title("Weekly Subject Study Allocation")
     ax.set_xlabel("Weeks from Now")
     ax.set_xticks(x + width * len(subjects) / 2)
     ax.set_xticklabels([f"Week {i+1}" for i in range(max_weeks)])
@@ -173,34 +212,35 @@ def generate_weekly_chart(schedule, subjects, test_dates):
     plt.close()
     return chart_base64
 
-def generate_daily_schedule_chart(total_hours):
+def generate_daily_schedule_chart(schedule, total_hours):
     start_time = datetime.strptime("10:00", "%H:%M")
     end_time = datetime.strptime("22:00", "%H:%M")
     day_hours = (end_time - start_time).seconds / 3600
     days_needed = math.ceil(total_hours / day_hours)
     daily_hours = total_hours / days_needed
 
-    schedule_data = []
+    subjects = list(schedule.keys())
+    study_plan = []
     current_time = start_time
     remaining_hours = daily_hours
 
+    subject_index = 0
     while remaining_hours > 0 and current_time < end_time:
+        subj = subjects[subject_index % len(subjects)]
         study_duration = min(1.5, remaining_hours)
         study_end_time = current_time + timedelta(hours=study_duration)
         if study_end_time <= end_time:
-            schedule_data.append(('Study', current_time.strftime('%H:%M'), study_end_time.strftime('%H:%M')))
+            study_plan.append((subj, current_time.strftime('%H:%M'), study_end_time.strftime('%H:%M')))
             current_time = study_end_time
             remaining_hours -= study_duration
 
-            if remaining_hours > 0 and current_time < end_time:
-                break_duration = min(0.5, remaining_hours)
+            if remaining_hours > 0:
+                break_duration = 0.5
                 break_end_time = current_time + timedelta(hours=break_duration)
                 if break_end_time <= end_time:
-                    schedule_data.append(('Break', current_time.strftime('%H:%M'), break_end_time.strftime('%H:%M')))
+                    study_plan.append(("Break", current_time.strftime('%H:%M'), break_end_time.strftime('%H:%M')))
                     current_time = break_end_time
-                    remaining_hours -= break_duration
-                else:
-                    break
+            subject_index += 1
         else:
             break
 
@@ -210,7 +250,9 @@ def generate_daily_schedule_chart(total_hours):
     bar_height = 0.8
     current_y = 0
 
-    for activity, start, end in schedule_data:
+    colors = plt.cm.tab10(np.linspace(0, 1, len(subjects)))
+
+    for activity, start, end in study_plan:
         start_dt = datetime.strptime(start, '%H:%M')
         end_dt = datetime.strptime(end, '%H:%M')
         duration_minutes = (end_dt - start_dt).total_seconds() / 60
@@ -220,9 +262,14 @@ def generate_daily_schedule_chart(total_hours):
         bar_width = (duration_minutes / total_day_minutes)
         left = (start_minutes / total_day_minutes)
 
-        color = 'skyblue' if activity == 'Study' else 'lightcoral'
-        ax.barh(current_y, bar_width, left=left, height=bar_height, color=color, label=activity if current_y == 0 else "")
-        ax.text(left + bar_width / 2, current_y, f"{start}-{end}", ha='center', va='center', color='black')
+        if activity == "Break":
+            color = 'lightcoral'
+        else:
+            idx = subjects.index(activity)
+            color = colors[idx]
+
+        ax.barh(current_y, bar_width, left=left, height=bar_height, color=color, label=activity if activity != "Break" else "")
+        ax.text(left + bar_width / 2, current_y, f"{activity} ({start}-{end})", ha='center', va='center', color='black', fontsize=8)
 
         y_positions.append(current_y)
         y_ticks.append("")
@@ -246,9 +293,23 @@ def generate_daily_schedule_chart(total_hours):
     plt.close()
     return chart_base64
 
-def detect_burnout(sleep_hours):
+def detect_burnout(study_hours, sleep_hours, score_fluctuations):
     avg_sleep = round(np.mean(sleep_hours), 2)
-    return ("Burnout Detected" if avg_sleep < 6 else "No Burnout"), avg_sleep
+    avg_study = round(np.mean(study_hours), 2)
+    fluct = round(np.std(score_fluctuations), 2)
+
+    burnout_tips = []
+    burnout_status = "No Burnout"
+    if avg_sleep < 6 or avg_study > 10 or fluct > 15:
+        burnout_status = "Burnout Detected"
+        if avg_sleep < 6:
+            burnout_tips.append("Increase your sleep to at least 7–8 hours for better focus.")
+        if avg_study > 10:
+            burnout_tips.append("Reduce study load. More than 10 hours/day is unsustainable.")
+        if fluct > 15:
+            burnout_tips.append("Your scores fluctuate a lot — try consistent revision rather than cramming.")
+
+    return burnout_status, avg_sleep, avg_study, burnout_tips
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -267,16 +328,21 @@ def index():
 
         schedule = create_study_schedule(subjects, scores, desired_scores, test_dates, total_hours)
         weekly_chart = generate_weekly_chart(schedule, subjects, test_dates)
-        burnout_status, avg_sleep = detect_burnout(sleep_hours)
-        avg_study = round(np.mean(study_hours), 2)
-        daily_chart = generate_daily_schedule_chart(total_hours)
-        schedule_str = "\n".join([f"{k}: {v} hrs" for k, v in schedule.items()])
+        daily_chart = generate_daily_schedule_chart(schedule, total_hours)
+
+        burnout_status, avg_sleep, avg_study, burnout_tips = detect_burnout(study_hours, sleep_hours, score_fluctuations)
+
+        schedule_str = "<br>".join([f"<b>{k}</b>: {v} hrs" for k, v in schedule.items()])
 
         recommendations = []
         if diet_quality < 5:
-            recommendations.append("🍏 Consider improving your diet. A nutritious diet boosts brain function and helps sustain energy levels.")
+            recommendations.append("🍏 Improve your diet: add fruits, vegetables, and whole grains for brain health.")
         if exercise_frequency < 5:
-            recommendations.append("🏃 Try increasing your physical activity. Even light exercise can improve mood and focus.")
+            recommendations.append("🏃 Increase physical activity: even 20 minutes daily improves memory retention.")
+        if avg_sleep < 7:
+            recommendations.append("😴 Prioritize rest: aim for 7–8 hrs of quality sleep.")
+        if avg_study > 9:
+            recommendations.append("📉 Balance is key: too much study without rest reduces efficiency.")
 
         result = {
             "schedule": schedule_str,
@@ -285,7 +351,8 @@ def index():
             "burnout": burnout_status,
             "avg_study": avg_study,
             "avg_sleep": avg_sleep,
-            "recommendations": recommendations
+            "recommendations": recommendations,
+            "burnout_tips": burnout_tips
         }
 
     return render_template_string(HTML_FORM, result=result)
