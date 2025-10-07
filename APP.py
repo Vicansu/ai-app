@@ -87,6 +87,24 @@ HTML_FORM = """
         .chart-container { text-align: center; margin-top: 20px; }
         img { max-width: 100%; height: auto; border-radius: 10px; margin-top: 10px; }
         .highlight { font-weight: bold; color: #d63384; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #007BFF;
+            color: white;
+        }
+        tr:hover {
+            background-color: #f1f1f1;
+        }
     </style>
 </head>
 <body>
@@ -135,7 +153,7 @@ HTML_FORM = """
     </div>
 
     <h2>📅 Allocated Total Study Hours</h2>
-    <div class="section schedule">{{ result['schedule'] }}</div>
+    <div class="section schedule">{{ result['schedule'] | safe }}</div>
 
     <h2>📈 Averages</h2>
     <div class="section averages">
@@ -163,7 +181,7 @@ HTML_FORM = """
     <h2>🍎 Health & Lifestyle Recommendations</h2>
     <div class="section recommendation">
         {% for rec in result['recommendations'] %}
-            <p>{{ rec }}</p>
+            <p>✅ {{ rec }}</p>
         {% endfor %}
     </div>
     {% endif %}
@@ -256,11 +274,9 @@ def generate_daily_schedule_chart(schedule, total_hours):
             break
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    y_ticks = []
-    y_positions = []
+    y_ticks, y_positions = [], []
     bar_height = 0.8
     current_y = 0
-
     colors = plt.cm.tab10(np.linspace(0, 1, len(subjects)))
 
     for activity, start, end in study_plan:
@@ -270,31 +286,24 @@ def generate_daily_schedule_chart(schedule, total_hours):
         start_minutes = (start_dt - start_time).total_seconds() / 60
         total_day_minutes = (end_time - start_time).total_seconds() / 60
 
-        bar_width = (duration_minutes / total_day_minutes)
-        left = (start_minutes / total_day_minutes)
+        bar_width = duration_minutes / total_day_minutes
+        left = start_minutes / total_day_minutes
 
-        if activity == "Break":
-            color = 'lightcoral'
-        else:
-            idx = subjects.index(activity)
-            color = colors[idx]
-
-        ax.barh(current_y, bar_width, left=left, height=bar_height, color=color, label=activity if activity != "Break" else "")
-        ax.text(left + bar_width / 2, current_y, f"{activity} ({start}-{end})", ha='center', va='center', color='black', fontsize=8)
+        color = 'lightcoral' if activity == "Break" else colors[subjects.index(activity)]
+        ax.barh(current_y, bar_width, left=left, height=bar_height, color=color)
+        ax.text(left + bar_width / 2, current_y, f"{activity} ({start}-{end})", ha='center', va='center', fontsize=8)
 
         y_positions.append(current_y)
         y_ticks.append("")
         current_y += 1
 
     ax.set_yticks(y_positions)
-    ax.set_yticklabels(y_ticks)
     ax.set_xlim(0, 1)
     ax.set_xlabel("Time of Day")
     ax.set_title("Daily Study Schedule")
     ax.set_xticks(np.linspace(0, 1, 13))
     ax.set_xticklabels([(start_time + timedelta(hours=i)).strftime('%I:%M %p') for i in range(0, 13)], rotation=45, ha='right')
     ax.invert_yaxis()
-    ax.legend(loc='upper right')
     plt.tight_layout()
 
     buf = io.BytesIO()
@@ -319,8 +328,47 @@ def detect_burnout(study_hours, sleep_hours, score_fluctuations):
             burnout_tips.append("📉 Studying more than 10 hours/day is counterproductive.")
         if fluct > 15:
             burnout_tips.append("🔄 Reduce score fluctuations by revising consistently instead of cramming.")
-
     return burnout_status, avg_sleep, avg_study, burnout_tips
+
+def generate_recommendations(diet_quality, exercise_frequency, avg_sleep, avg_study, burnout_status):
+    recs = []
+
+    # Diet-based
+    if diet_quality <= 3:
+        recs.append("🥗 Your diet quality is low — include lean proteins, whole grains, and 2 servings of fruit daily.")
+        recs.append("💧 Drink at least 2 liters of water per day to maintain focus.")
+    elif 4 <= diet_quality <= 6:
+        recs.append("🍽️ Improve consistency in meals — avoid skipping breakfast and reduce junk food.")
+    elif diet_quality >= 8:
+        recs.append("✅ Excellent nutrition habits — maintain your balanced eating pattern.")
+
+    # Exercise-based
+    if exercise_frequency <= 3:
+        recs.append("🏃 Add 30-minute brisk walks or light workouts at least 3 times weekly.")
+    elif 4 <= exercise_frequency <= 6:
+        recs.append("💪 Moderate exercise level — consider adding short morning stretches to energize your day.")
+    else:
+        recs.append("🔥 Excellent fitness consistency — this supports better concentration.")
+
+    # Sleep-based
+    if avg_sleep < 6:
+        recs.append("🛌 You’re not sleeping enough — aim for a fixed 7-hour sleep schedule.")
+    elif 6 <= avg_sleep < 7:
+        recs.append("😴 Slightly improve sleep quality by reducing screen time 30 minutes before bed.")
+    else:
+        recs.append("🌙 Great sleep consistency — keep your routine steady.")
+
+    # Study balance
+    if avg_study > 9:
+        recs.append("⚖️ You’re studying heavily — add 10-minute breaks per hour to retain focus.")
+    elif avg_study < 3:
+        recs.append("📚 Increase study hours gradually to at least 4–5 hours/day for steady improvement.")
+
+    # Burnout-specific
+    if burnout_status == "Burnout Detected":
+        recs.append("🚨 Burnout signs detected — take one day off per week and include light exercise or meditation.")
+
+    return recs
 
 # =========================
 # MAIN ROUTE
@@ -345,31 +393,22 @@ def index():
         daily_chart = generate_daily_schedule_chart(schedule, total_hours)
 
         burnout_status, avg_sleep, avg_study, burnout_tips = detect_burnout(study_hours, sleep_hours, score_fluctuations)
-
-        schedule_str = "<br>".join([f"<b>{k}</b>: {v} hrs" for k, v in schedule.items()])
-
-        recommendations = []
-        if diet_quality < 5:
-            recommendations.append("🥦 Improve diet quality with balanced meals (fruits, veggies, whole grains).")
-        if exercise_frequency < 5:
-            recommendations.append("🏃 Try exercising at least 3 times per week to boost energy.")
-        if avg_sleep < 7:
-            recommendations.append("💤 Aim for 7–8 hours of sleep each night for peak focus.")
-        if avg_study > 9:
-            recommendations.append("⚖️ Balance study with breaks — efficiency > long hours!")
+        schedule_rows = "".join([f"<tr><td><b>{k}</b></td><td>{v} hrs</td></tr>" for k, v in schedule.items()])
+        schedule_table = f"<table><tr><th>Subject</th><th>Allocated Hours</th></tr>{schedule_rows}</table>"
+        recommendations = generate_recommendations(diet_quality, exercise_frequency, avg_sleep, avg_study, burnout_status)
 
         result = {
-            "schedule": schedule_str,
+            "schedule": schedule_table,
             "weekly_chart": weekly_chart,
             "daily_chart": daily_chart,
             "burnout": burnout_status,
-            "avg_study": avg_study,
+            "burnout_tips": burnout_tips,
             "avg_sleep": avg_sleep,
-            "recommendations": recommendations,
-            "burnout_tips": burnout_tips
+            "avg_study": avg_study,
+            "recommendations": recommendations
         }
-
     return render_template_string(HTML_FORM, result=result)
+
 
 if __name__ == "__main__":
     app.run(debug=True)
